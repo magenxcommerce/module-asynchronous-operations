@@ -3,22 +3,23 @@
  * Copyright © Magento, Inc. All rights reserved.
  * See COPYING.txt for license details.
  */
+
 declare(strict_types=1);
 
 namespace Magento\AsynchronousOperations\Model;
 
+use Magento\Framework\App\ObjectManager;
+use Magento\Framework\DataObject\IdentityGeneratorInterface;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\AsynchronousOperations\Api\Data\ItemStatusInterfaceFactory;
 use Magento\AsynchronousOperations\Api\Data\AsyncResponseInterface;
 use Magento\AsynchronousOperations\Api\Data\AsyncResponseInterfaceFactory;
 use Magento\AsynchronousOperations\Api\Data\ItemStatusInterface;
-use Magento\AsynchronousOperations\Api\Data\ItemStatusInterfaceFactory;
-use Magento\Authorization\Model\UserContextInterface;
 use Magento\Framework\Bulk\BulkManagementInterface;
-use Magento\Framework\DataObject\IdentityGeneratorInterface;
-use Magento\Framework\Encryption\Encryptor;
-use Magento\AsynchronousOperations\Api\SaveMultipleOperationsInterface;
 use Magento\Framework\Exception\BulkException;
-use Magento\Framework\Exception\LocalizedException;
 use Psr\Log\LoggerInterface;
+use Magento\AsynchronousOperations\Model\ResourceModel\Operation\OperationRepository;
+use Magento\Authorization\Model\UserContextInterface;
 
 /**
  * Class MassSchedule used for adding multiple entities as Operations to Bulk Management with the status tracking
@@ -28,7 +29,7 @@ use Psr\Log\LoggerInterface;
 class MassSchedule
 {
     /**
-     * @var IdentityGeneratorInterface
+     * @var \Magento\Framework\DataObject\IdentityGeneratorInterface
      */
     private $identityService;
 
@@ -43,7 +44,7 @@ class MassSchedule
     private $itemStatusInterfaceFactory;
 
     /**
-     * @var BulkManagementInterface
+     * @var \Magento\Framework\Bulk\BulkManagementInterface
      */
     private $bulkManagement;
 
@@ -53,24 +54,14 @@ class MassSchedule
     private $logger;
 
     /**
-     * @var OperationRepositoryInterface
+     * @var OperationRepository
      */
     private $operationRepository;
 
     /**
-     * @var UserContextInterface
+     * @var \Magento\Authorization\Model\UserContextInterface
      */
     private $userContext;
-
-    /**
-     * @var Encryptor
-     */
-    private $encryptor;
-
-    /**
-     * @var SaveMultipleOperationsInterface
-     */
-    private $saveMultipleOperations;
 
     /**
      * Initialize dependencies.
@@ -80,10 +71,8 @@ class MassSchedule
      * @param AsyncResponseInterfaceFactory $asyncResponseFactory
      * @param BulkManagementInterface $bulkManagement
      * @param LoggerInterface $logger
-     * @param OperationRepositoryInterface $operationRepository
+     * @param OperationRepository $operationRepository
      * @param UserContextInterface $userContext
-     * @param Encryptor $encryptor
-     * @param SaveMultipleOperationsInterface $saveMultipleOperations
      */
     public function __construct(
         IdentityGeneratorInterface $identityService,
@@ -91,10 +80,8 @@ class MassSchedule
         AsyncResponseInterfaceFactory $asyncResponseFactory,
         BulkManagementInterface $bulkManagement,
         LoggerInterface $logger,
-        OperationRepositoryInterface $operationRepository,
-        UserContextInterface $userContext,
-        Encryptor $encryptor,
-        SaveMultipleOperationsInterface $saveMultipleOperations
+        OperationRepository $operationRepository,
+        UserContextInterface $userContext = null
     ) {
         $this->identityService = $identityService;
         $this->itemStatusInterfaceFactory = $itemStatusInterfaceFactory;
@@ -102,9 +89,7 @@ class MassSchedule
         $this->bulkManagement = $bulkManagement;
         $this->logger = $logger;
         $this->operationRepository = $operationRepository;
-        $this->userContext = $userContext;
-        $this->encryptor = $encryptor;
-        $this->saveMultipleOperations = $saveMultipleOperations;
+        $this->userContext = $userContext ?: ObjectManager::getInstance()->get(UserContextInterface::class);
     }
 
     /**
@@ -143,14 +128,11 @@ class MassSchedule
         foreach ($entitiesArray as $key => $entityParams) {
             /** @var \Magento\AsynchronousOperations\Api\Data\ItemStatusInterface $requestItem */
             $requestItem = $this->itemStatusInterfaceFactory->create();
+
             try {
-                $operation = $this->operationRepository->create($topicName, $entityParams, $groupId, $key);
-                $operations[] = $operation;
+                $operations[] = $this->operationRepository->createByTopic($topicName, $entityParams, $groupId);
                 $requestItem->setId($key);
                 $requestItem->setStatus(ItemStatusInterface::STATUS_ACCEPTED);
-                $requestItem->setDataHash(
-                    $this->encryptor->hash($operation->getSerializedData(), Encryptor::HASH_VERSION_SHA256)
-                );
                 $requestItems[] = $requestItem;
             } catch (\Exception $exception) {
                 $this->logger->error($exception);
@@ -166,7 +148,6 @@ class MassSchedule
             }
         }
 
-        $this->saveMultipleOperations->execute($operations);
         if (!$this->bulkManagement->scheduleBulk($groupId, $operations, $bulkDescription, $userId)) {
             throw new LocalizedException(
                 __('Something went wrong while processing the request.')

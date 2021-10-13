@@ -6,9 +6,9 @@
 namespace Magento\AsynchronousOperations\Controller\Adminhtml\Bulk;
 
 /**
- * Class View Operation Details Controller
+ * Class View Opertion Details Controller
  */
-class Details extends \Magento\Backend\App\Action implements \Magento\Framework\App\Action\HttpGetActionInterface
+class Details extends \Magento\Backend\App\Action
 {
     /**
      * @var \Magento\Framework\View\Result\PageFactory
